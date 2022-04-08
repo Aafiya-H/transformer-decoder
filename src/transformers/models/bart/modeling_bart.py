@@ -486,7 +486,7 @@ class BartDecoderLayer(nn.Module):
         outputs = (hidden_states,)
 
         if output_attentions:
-            outputs += (self_attn_weights, cross_attn_weights)
+            outputs += (self_attn_weights, cross_attn_weights, answer_attn_weights)
 
         if use_cache:
             outputs += (present_key_value,)
