@@ -393,6 +393,7 @@ class BartDecoderLayer(nn.Module):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = True,
+        answer_embeddings,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
         Args:
@@ -458,14 +459,15 @@ class BartDecoderLayer(nn.Module):
             residual = hidden_states
 
             # cross_attn cached key/values tuple is at positions 3,4 of present_key_value tuple
-            answer_attn_past_key_value = past_key_value[-2:] if past_key_value is not None else None
+            answer_attn_past_key_value = past_key_value[-2:] if past_key_value is not None else None # not sure if its -2
             hidden_states, answer_attn_weights, answer_attn_present_key_value = self.answer_attn(
                 hidden_states=hidden_states,
-                key_value_states=encoder_hidden_states,
+                key_value_states=answer_embeddings,
                 attention_mask=encoder_attention_mask,
                 layer_head_mask=cross_attn_layer_head_mask,
                 past_key_value=answer_attn_past_key_value,
                 output_attentions=output_attentions,
+
             )
             hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
             hidden_states = residual + hidden_states
@@ -960,6 +962,7 @@ class BartDecoder(BartPretrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        answer_embeddings,
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
         r"""
         Args:
@@ -1115,6 +1118,7 @@ class BartDecoder(BartPretrainedModel):
                     head_mask[idx] if head_mask is not None else None,
                     cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
                     None,
+                    answer_embeddings
                 )
             else:
 
@@ -1130,6 +1134,7 @@ class BartDecoder(BartPretrainedModel):
                     past_key_value=past_key_value,
                     output_attentions=output_attentions,
                     use_cache=use_cache,
+                    answer_embeddings,
                 )
             hidden_states = layer_outputs[0]
 
