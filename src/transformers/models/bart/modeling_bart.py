@@ -393,7 +393,8 @@ class BartDecoderLayer(nn.Module):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = True,
-        answer_embeddings,
+        answer_embeddings: Optional[torch.Tensor] = True,
+        answer_mask: Optional[torch.Tensor] = True,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
         Args:
@@ -463,7 +464,7 @@ class BartDecoderLayer(nn.Module):
             hidden_states, answer_attn_weights, answer_attn_present_key_value = self.answer_attn(
                 hidden_states=hidden_states,
                 key_value_states=answer_embeddings,
-                attention_mask=encoder_attention_mask,
+                attention_mask=answer_mask,
                 layer_head_mask=cross_attn_layer_head_mask,
                 past_key_value=answer_attn_past_key_value,
                 output_attentions=output_attentions,
@@ -962,7 +963,8 @@ class BartDecoder(BartPretrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        answer_embeddings,
+        answer_embeddings: Optional[torch.FloatTensor] = None,
+        answer_mask: Optional[torch.LongTensor] = None
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
         r"""
         Args:
@@ -1058,9 +1060,10 @@ class BartDecoder(BartPretrainedModel):
         )
 
         # expand encoder attention mask
-        if encoder_hidden_states is not None and encoder_attention_mask is not None:
+        if encoder_hidden_states is not None and encoder_attention_mask is not None and answer_mask is not None:
             # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
             encoder_attention_mask = _expand_mask(encoder_attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1])
+            answer_mask = _expand_mask(answer_mask, inputs_embeds.dtype, tgt_len=input_shape[-1])
 
         # embed positions
         positions = self.embed_positions(input_shape, past_key_values_length)
@@ -1118,7 +1121,8 @@ class BartDecoder(BartPretrainedModel):
                     head_mask[idx] if head_mask is not None else None,
                     cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
                     None,
-                    answer_embeddings
+                    answer_embeddings, 
+                    answer_mask
                 )
             else:
 
@@ -1134,7 +1138,8 @@ class BartDecoder(BartPretrainedModel):
                     past_key_value=past_key_value,
                     output_attentions=output_attentions,
                     use_cache=use_cache,
-                    answer_embeddings,
+                    answer_embeddings = answer_embeddings,
+                    answer_mask = answer_mask
                 )
             hidden_states = layer_outputs[0]
 
