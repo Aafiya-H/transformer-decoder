@@ -136,7 +136,7 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "The name of the column in the datasets containing the summaries (for summarization)."},
     )
-    answer_column: Optional[str] = field(
+    answers_column: Optional[str] = field(
         default=None,
         metadata={"help": "The name of the column in the datasets containing the answers (for qgen)."},
     )
