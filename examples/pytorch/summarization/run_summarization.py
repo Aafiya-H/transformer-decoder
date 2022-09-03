@@ -136,7 +136,7 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "The name of the column in the datasets containing the summaries (for summarization)."},
     )
-    answer_column: Optional[str] = field(
+    answers_column: Optional[str] = field(
         default=None,
         metadata={"help": "The name of the column in the datasets containing the answers (for qgen)."},
     )
@@ -487,7 +487,6 @@ def main():
         )
     
     def tokenize_answers(answer): 
-        print(answer)
         tokenized_answer = tokenizer(answer,max_length=20, padding="max_length", truncation=True)
         return tokenized_answer
 
@@ -496,7 +495,7 @@ def main():
 
         inputs, targets, answers = [], [], []
         for i in range(len(examples[text_column])):
-            if examples[text_column][i] is not None and examples[summary_column][i] is not None and examples[answers_column[i]] is not None:
+            if examples[text_column][i] is not None and examples[summary_column][i] is not None and examples[answers_column][i] is not None:
                 inputs.append(examples[text_column][i])
                 targets.append(examples[summary_column][i])
                 answers.append(ast.literal_eval(examples[answers_column][i])['text'])

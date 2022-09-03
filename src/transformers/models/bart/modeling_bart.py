@@ -1197,7 +1197,7 @@ class BartModel(BartPretrainedModel):
         self.encoder.embed_tokens = self.shared
         self.decoder.embed_tokens = self.shared
 
-    def get_embeddings(encoded_text, mask, model, layer = 6):
+    def get_embeddings(self, encoded_text, mask, model, layer = 6):
         # model.eval()
         # with torch.no_grad():
         #     out = model(encoded_text, attention_mask=mask, output_hidden_states=True).hidden_states
@@ -1270,7 +1270,7 @@ class BartModel(BartPretrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         answer_tokenized_text, answer_mask, input_ids, attention_mask = self.get_split_answer_input(input_ids, attention_mask)
-
+        
         if encoder_outputs is None:
             encoder_outputs = self.encoder(
                 input_ids=input_ids,
@@ -1291,6 +1291,8 @@ class BartModel(BartPretrainedModel):
 
         encoder = self.get_encoder()
         answer_embeddings = self.get_embeddings(answer_tokenized_text, answer_mask, encoder)
+        answer_mask = torch.ones(answer_embeddings.size(0), 1)
+        answer_mask = answer_mask.to(self.device)
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -1425,9 +1427,7 @@ class BartForConditionalGeneration(BartPretrainedModel):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            answer_mask = answer_mask,
-            answer_embeddings = answer_embeddings
+            return_dict=return_dict
         )
         lm_logits = self.lm_head(outputs[0]) + self.final_logits_bias
 
