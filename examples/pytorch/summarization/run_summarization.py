@@ -23,7 +23,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
-
+import ast 
 import datasets
 import nltk  # Here to have a nice missing dependency error message early on
 import numpy as np
@@ -135,6 +135,10 @@ class DataTrainingArguments:
     summary_column: Optional[str] = field(
         default=None,
         metadata={"help": "The name of the column in the datasets containing the summaries (for summarization)."},
+    )
+    answers_column: Optional[str] = field(
+        default=None,
+        metadata={"help": "The name of the column in the datasets containing the answers (for qgen)."},
     )
     train_file: Optional[str] = field(
         default=None, metadata={"help": "The input training data file (a jsonlines or csv file)."}
@@ -356,7 +360,7 @@ def main():
             extension = data_args.test_file.split(".")[-1]
         raw_datasets = load_dataset(extension, data_files=data_files, cache_dir=model_args.cache_dir)
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.  
 
     # Load pretrained model and tokenizer
     #
@@ -462,6 +466,15 @@ def main():
             raise ValueError(
                 f"--summary_column' value '{data_args.summary_column}' needs to be one of: {', '.join(column_names)}"
             )
+    
+    if data_args.answers_column is None:
+        answers_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
+    else:
+        answers_column = data_args.answers_column
+        if answers_column not in column_names:
+            raise ValueError(
+                f"--answers_column' value '{data_args.answers_column}' needs to be one of: {', '.join(column_names)}"
+            )
 
     # Temporarily set max_target_length for training.
     max_target_length = data_args.max_target_length
@@ -472,18 +485,35 @@ def main():
             "label_smoothing is enabled but the `prepare_decoder_input_ids_from_labels` method is not defined for"
             f"`{model.__class__.__name__}`. This will lead to loss being calculated twice and will take up more memory"
         )
+    
+    def tokenize_answers(answer): 
+        print(answer)
+        tokenized_answer = tokenizer(answer,max_length=20, padding="max_length", truncation=True)
+        return tokenized_answer
 
     def preprocess_function(examples):
         # remove pairs where at least one record is None
 
-        inputs, targets = [], []
+        inputs, targets, answers = [], [], []
         for i in range(len(examples[text_column])):
-            if examples[text_column][i] is not None and examples[summary_column][i] is not None:
+            if examples[text_column][i] is not None and examples[summary_column][i] is not None and examples[answers_column[i]] is not None:
                 inputs.append(examples[text_column][i])
                 targets.append(examples[summary_column][i])
+                answers.append(ast.literal_eval(examples[answers_column][i])['text'])
 
         inputs = [prefix + inp for inp in inputs]
         model_inputs = tokenizer(inputs, max_length=data_args.max_source_length, padding=padding, truncation=True)
+        
+        for index, sample in enumerate(answers):
+            tokenized_answer = tokenize_answers(answers[index])
+            tokenized_answer['input_ids'].extend(model_inputs['input_ids'][index])
+            model_inputs['input_ids'][index] = tokenized_answer['input_ids']
+
+            tokenized_answer['attention_mask'].extend(model_inputs['attention_mask'][index]) 
+            model_inputs['attention_mask'][index] = tokenized_answer['attention_mask']
+            
+            model_inputs['input_ids'][index] = model_inputs['input_ids'][index][:512]
+            model_inputs['attention_mask'][index] = model_inputs['attention_mask'][index][:512]
 
         # Setup the tokenizer for targets
         with tokenizer.as_target_tokenizer():

@@ -1197,11 +1197,29 @@ class BartModel(BartPretrainedModel):
         self.encoder.embed_tokens = self.shared
         self.decoder.embed_tokens = self.shared
 
+    def get_embeddings(encoded_text, mask, model, layer = 6):
+        # model.eval()
+        # with torch.no_grad():
+        #     out = model(encoded_text, attention_mask=mask, output_hidden_states=True).hidden_states
+        #     emb = out[layer]  
+        out = model(encoded_text, attention_mask=mask, output_hidden_states=True).hidden_states
+        emb = out[layer]
+        emb = torch.mean(emb, dim = 1)
+        return emb
+
     def get_encoder(self):
         return self.encoder
 
     def get_decoder(self):
         return self.decoder
+    
+    def get_split_answer_input(self, input_ids, attention_mask):
+        answer_tokenized_text = input_ids[:,:20]
+        answer_mask = attention_mask[:,:20]
+
+        input_ids = input_ids[:,20:]
+        attention_mask = attention_mask[:,20:]
+        return answer_tokenized_text, answer_mask, input_ids, attention_mask
 
     @add_start_docstrings_to_model_forward(BART_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
@@ -1251,6 +1269,8 @@ class BartModel(BartPretrainedModel):
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        answer_tokenized_text, answer_mask, input_ids, attention_mask = self.get_split_answer_input(input_ids, attention_mask)
+
         if encoder_outputs is None:
             encoder_outputs = self.encoder(
                 input_ids=input_ids,
@@ -1269,6 +1289,9 @@ class BartModel(BartPretrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
+        encoder = self.get_encoder()
+        answer_embeddings = self.get_embeddings(answer_tokenized_text, answer_mask, encoder)
+
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
@@ -1283,6 +1306,8 @@ class BartModel(BartPretrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            answer_mask = answer_mask,
+            answer_embeddings = answer_embeddings,
         )
 
         if not return_dict:
@@ -1363,6 +1388,8 @@ class BartForConditionalGeneration(BartPretrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        answer_mask = None,
+        answer_embeddings = None
     ) -> Union[Tuple, Seq2SeqLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1399,6 +1426,8 @@ class BartForConditionalGeneration(BartPretrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            answer_mask = answer_mask,
+            answer_embeddings = answer_embeddings
         )
         lm_logits = self.lm_head(outputs[0]) + self.final_logits_bias
 
