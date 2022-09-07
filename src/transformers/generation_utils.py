@@ -510,7 +510,7 @@ class GenerationMixin:
         encoder = self.get_encoder()
 
         # 2. prepare encoder args and encoder kwargs from model kwargs
-        irrelevant_prefix = ["decoder_", "cross_attn", "use_cache"]
+        irrelevant_prefix = ["decoder_", "cross_attn", "use_cache", "answer_"]
         encoder_kwargs = {
             argument: value
             for argument, value in model_kwargs.items()
@@ -522,7 +522,6 @@ class GenerationMixin:
         encoder_kwargs["return_dict"] = True
         encoder_kwargs[model_input_name] = inputs_tensor
         model_kwargs["encoder_outputs"]: ModelOutput = encoder(**encoder_kwargs)
-
         return model_kwargs
 
     def _prepare_decoder_input_ids_for_generation(
@@ -578,14 +577,16 @@ class GenerationMixin:
             torch.arange(input_ids.shape[0]).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
         )
         input_ids = input_ids.index_select(0, expanded_return_idx)
-
+        model_kwargs["answer_tokenized_text"] = model_kwargs["answer_tokenized_text"].index_select(0,expanded_return_idx)
+        model_kwargs["answer_mask"] = model_kwargs["answer_mask"].index_select(0,expanded_return_idx)
+        
         if "token_type_ids" in model_kwargs:
             token_type_ids = model_kwargs["token_type_ids"]
             model_kwargs["token_type_ids"] = token_type_ids.index_select(0, expanded_return_idx)
 
         if attention_mask is not None:
             model_kwargs["attention_mask"] = attention_mask.index_select(0, expanded_return_idx)
-
+            
         if is_encoder_decoder:
             if encoder_outputs is None:
                 raise ValueError("If `is_encoder_decoder` is True, make sure that `encoder_outputs` is defined.")
@@ -827,7 +828,15 @@ class GenerationMixin:
             transition_scores.masked_fill_(zero_transition_prob_mask, 0.0)
 
         return transition_scores
+    
+    def get_split_answer_input(self, input_ids, attention_mask):
+        answer_tokenized_text = input_ids[:,:20]
+        answer_mask = attention_mask[:,:20]
 
+        input_ids = input_ids[:,20:]
+        attention_mask = attention_mask[:,20:]
+        return answer_tokenized_text, answer_mask, input_ids, attention_mask
+    
     @torch.no_grad()
     def generate(
         self,
@@ -1098,6 +1107,7 @@ class GenerationMixin:
         >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
         ['Paris ist eines der dichtesten besiedelten Gebiete Europas.']
         ```"""
+        
         # 1. Set generation parameters if not already defined
         bos_token_id = bos_token_id if bos_token_id is not None else self.config.bos_token_id
         num_beams = num_beams if num_beams is not None else self.config.num_beams
@@ -1133,7 +1143,7 @@ class GenerationMixin:
         # inputs_tensor has to be defined
         # model_input_name is defined if model-specific keyword input is passed
         # otherwise model_input_name is None
-        # all model-specific keyword inputs are removed from `model_kwargs`
+        # all model-specific keyword inputs are removed from `model_kwargs`        
         inputs_tensor, model_input_name, model_kwargs = self._prepare_model_inputs(inputs, bos_token_id, model_kwargs)
         batch_size = inputs_tensor.shape[0]
 
@@ -1149,7 +1159,19 @@ class GenerationMixin:
             model_kwargs["attention_mask"] = self._prepare_attention_mask_for_generation(
                 inputs_tensor, pad_token_id, eos_token_id
             )
-
+        
+        answer_tokenized_text, answer_mask, inputs_tensor, attention_mask = self.get_split_answer_input(inputs_tensor, model_kwargs["attention_mask"])
+        model_kwargs["attention_mask"] = attention_mask
+        model_kwargs["answer_tokenized_text"] = answer_tokenized_text
+        model_kwargs["answer_mask"] = answer_mask
+        
+        # print("-"*20)
+        # print("input ids: ", inputs_tensor.size())
+        # print("attention mask: ", model_kwargs["attention_mask"].size())
+        # print("answer_tokenized_text: ", answer_tokenized_text.size())
+        # print("answer_mask: ", model_kwargs["answer_mask"].size())
+        # print("-"*20)
+            
         if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
             # if model is encoder decoder encoder_outputs are created
             # and added to `model_kwargs`
@@ -1192,7 +1214,7 @@ class GenerationMixin:
                 f"Input length of {input_ids_string} is {input_ids_seq_length}, but ``max_length`` is set to {max_length}. "
                 "This can lead to unexpected behavior. You should consider increasing ``config.max_length`` or ``max_length``."
             )
-
+            
         # 6. determine generation mode
         is_constraint_gen_mode = constraints is not None or force_words_ids is not None
         is_greedy_gen_mode = (
@@ -2119,7 +2141,7 @@ class GenerationMixin:
             raise ValueError(
                 f"Batch dimension of `input_ids` should be {num_beams * batch_size}, but is {batch_beam_size}."
             )
-
+        
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
         beam_indices = (
@@ -2141,6 +2163,10 @@ class GenerationMixin:
         beam_scores = beam_scores.view((batch_size * num_beams,))
 
         this_peer_finished = False  # used by synced_gpus only
+        
+        # answer_tokenized_text, answer_mask, input_ids, attention_mask = self.get_split_answer_input(input_ids, attention_mask)
+        # model_kwargs['
+        # print("inputs: ", input_ids.size())
         while True:
 
             if synced_gpus:
@@ -2152,9 +2178,10 @@ class GenerationMixin:
                 # did all peers finish? the reduced sum will be 0.0 then
                 if this_peer_finished_flag.item() == 0.0:
                     break
-
+            
+            
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
-
+            
             outputs = self(
                 **model_inputs,
                 return_dict=True,

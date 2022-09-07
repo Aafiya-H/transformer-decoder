@@ -526,6 +526,7 @@ def main():
             ]
 
         model_inputs["labels"] = labels["input_ids"]
+        # print("Length of labels: ", len(inputs))
         return model_inputs
 
     if training_args.do_train:
