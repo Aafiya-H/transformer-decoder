@@ -358,14 +358,6 @@ class BartDecoderLayer(nn.Module):
             is_decoder=True,
         )
 
-        self.answer_attn = BartAttention(
-            embed_dim=self.embed_dim,
-            num_heads=config.decoder_attention_heads,
-            dropout=config.attention_dropout,
-            is_decoder=True,
-        )
-        self.answer_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
@@ -458,26 +450,26 @@ class BartDecoderLayer(nn.Module):
             residual = hidden_states
 
             # cross_attn cached key/values tuple is at positions 3,4 of present_key_value tuple
-            answer_attn_past_key_value = past_key_value[4:] if past_key_value is not None else None # not sure if its -2
+            # answer_attn_past_key_value = past_key_value[4:] if past_key_value is not None else None # not sure if its -2
             
-            # print("Hidden states size: ", hidden_states.size())
-            # print("answer_embeddings size: ", answer_embeddings.size())
-            # print("attention_mask: ", answer_mask.size())
-            hidden_states, answer_attn_weights, answer_attn_present_key_value = self.answer_attn(
-                hidden_states=hidden_states,
-                key_value_states=answer_embeddings,
-                attention_mask=answer_mask,
-                layer_head_mask=cross_attn_layer_head_mask,
-                past_key_value=answer_attn_past_key_value,
-                output_attentions=output_attentions,
+            # # print("Hidden states size: ", hidden_states.size())
+            # # print("answer_embeddings size: ", answer_embeddings.size())
+            # # print("attention_mask: ", answer_mask.size())
+            # hidden_states, answer_attn_weights, answer_attn_present_key_value = self.answer_attn(
+            #     hidden_states=hidden_states,
+            #     key_value_states=answer_embeddings,
+            #     attention_mask=answer_mask,
+            #     layer_head_mask=cross_attn_layer_head_mask,
+            #     past_key_value=answer_attn_past_key_value,
+            #     output_attentions=output_attentions,
 
-            )
-            hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
-            hidden_states = residual + hidden_states
-            hidden_states = self.answer_attn_layer_norm(hidden_states)
+            # )
+            # hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+            # hidden_states = residual + hidden_states
+            # hidden_states = self.answer_attn_layer_norm(hidden_states)
 
-            # add cross-attn to positions 3,4 of present_key_value tuple
-            present_key_value = present_key_value + answer_attn_present_key_value
+            # # add cross-attn to positions 3,4 of present_key_value tuple
+            # present_key_value = present_key_value + answer_attn_present_key_value
 
         # Fully Connected
         residual = hidden_states
@@ -491,13 +483,12 @@ class BartDecoderLayer(nn.Module):
         outputs = (hidden_states,)
 
         if output_attentions:
-            outputs += (self_attn_weights, cross_attn_weights, answer_attn_weights)
+            outputs += (self_attn_weights, cross_attn_weights)
 
         if use_cache:
             outputs += (present_key_value,)
 
         return outputs
-
 
 class BartClassificationHead(nn.Module):
     """Head for sentence-level classification tasks."""
@@ -965,8 +956,6 @@ class BartDecoder(BartPretrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        answer_embeddings: Optional[torch.FloatTensor] = None,
-        answer_mask: Optional[torch.LongTensor] = None
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
         r"""
         Args:
@@ -1173,7 +1162,6 @@ class BartDecoder(BartPretrainedModel):
             cross_attentions=all_cross_attentions,
         )
 
-
 @add_start_docstrings(
     "The bare BART Model outputting raw hidden-states without any specific head on top.",
     BART_START_DOCSTRING,
@@ -1297,8 +1285,13 @@ class BartModel(BartPretrainedModel):
 
         encoder = self.get_encoder()
         answer_embeddings = self.get_embeddings(answer_tokenized_text, answer_mask, encoder)
-        answer_mask = torch.ones(answer_embeddings.size(0), 1)
-        answer_mask = answer_mask.to(self.device)
+        # answer_mask = torch.ones(answer_embeddings.size(0), 1)
+        # answer_mask = answer_mask.to(self.device)
+
+        answer_embeddings = torch.transpose(answer_embeddings,2,1)
+        weights = torch.matmul(encoder_outputs[0],answer_embeddings)
+        distribution = nn.functional.softmax(weights, dim = 1)
+        encoder_outputs[0] = encoder_outputs[0] * distribution
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -1314,8 +1307,6 @@ class BartModel(BartPretrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            answer_mask = answer_mask,
-            answer_embeddings = answer_embeddings,
         )
 
         if not return_dict:
