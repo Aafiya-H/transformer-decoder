@@ -1051,10 +1051,9 @@ class BartDecoder(BartPretrainedModel):
         )
 
         # expand encoder attention mask
-        if encoder_hidden_states is not None and encoder_attention_mask is not None and answer_mask is not None:
+        if encoder_hidden_states is not None and encoder_attention_mask is not None:
             # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
             encoder_attention_mask = _expand_mask(encoder_attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1])
-            answer_mask = _expand_mask(answer_mask, inputs_embeds.dtype, tgt_len=input_shape[-1])
 
         # embed positions
         positions = self.embed_positions(input_shape, past_key_values_length)
@@ -1112,8 +1111,6 @@ class BartDecoder(BartPretrainedModel):
                     head_mask[idx] if head_mask is not None else None,
                     cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
                     None,
-                    answer_embeddings, 
-                    answer_mask
                 )
             else:
 
@@ -1129,8 +1126,7 @@ class BartDecoder(BartPretrainedModel):
                     past_key_value=past_key_value,
                     output_attentions=output_attentions,
                     use_cache=use_cache,
-                    answer_embeddings = answer_embeddings,
-                    answer_mask = answer_mask
+                    
                 )
             hidden_states = layer_outputs[0]
 
@@ -1287,17 +1283,18 @@ class BartModel(BartPretrainedModel):
         answer_embeddings = self.get_embeddings(answer_tokenized_text, answer_mask, encoder)
         # answer_mask = torch.ones(answer_embeddings.size(0), 1)
         # answer_mask = answer_mask.to(self.device)
-
+        
+        answer_embeddings = answer_embeddings.unsqueeze(1)
         answer_embeddings = torch.transpose(answer_embeddings,2,1)
         weights = torch.matmul(encoder_outputs[0],answer_embeddings)
         distribution = nn.functional.softmax(weights, dim = 1)
-        encoder_outputs[0] = encoder_outputs[0] * distribution
+        answer_multiplied_outputs = encoder_outputs[0] * distribution
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_outputs[0],
+            encoder_hidden_states=answer_multiplied_outputs,
             encoder_attention_mask=attention_mask,
             head_mask=decoder_head_mask,
             cross_attn_head_mask=cross_attn_head_mask,
