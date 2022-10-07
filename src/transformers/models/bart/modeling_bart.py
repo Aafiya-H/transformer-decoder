@@ -1288,6 +1288,12 @@ class BartModel(BartPretrainedModel):
         answer_embeddings = torch.transpose(answer_embeddings,2,1)
         weights = torch.matmul(encoder_outputs[0],answer_embeddings)
         distribution = nn.functional.softmax(weights, dim = 1)
+        distribution = distribution * 100
+        # --------------------------------
+        distribution_min, distribution_max = distribution.min(), distribution.max()
+        new_min, new_max = 1e-6, 100
+        distribution = (distribution - distribution_min)/(distribution_max - distribution_min)*(new_max - new_min) + new_min
+        # --------------------------------
         answer_multiplied_outputs = encoder_outputs[0] * distribution
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
